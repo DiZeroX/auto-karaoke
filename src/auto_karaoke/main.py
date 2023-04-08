@@ -1,5 +1,6 @@
 import whisper_timestamped as whisper
 import torch
+import textdistance
 import json
 import ass
 import argparse
@@ -8,8 +9,12 @@ import re
 import datetime
 import string
 import copy
-import decimal
+import tkinter as tk
+from tkinter import ttk
+from tkinter.filedialog import askopenfilename, asksaveasfilename
+from functools import partial
 # import stable_whisper
+
 
 def preprocess_lyrics(input_lyrics):
     temp_lyrics = []
@@ -70,131 +75,353 @@ def remove_end_punctuation(temp_line):
 
 def is_same_word(word1: str, word2: str):
     # lowercase and remove punctuation and whitespace
-    word1 = word1.lower().translate(str.maketrans("", "", string.punctuation)).strip()
-    word2 = word2.lower().translate(str.maketrans("", "", string.punctuation)).strip()
+    word1 = word1.lower().translate(str.maketrans("", "", string.punctuation)).strip().strip("[-––]")
+    word2 = word2.lower().translate(str.maketrans("", "", string.punctuation)).strip().strip("[-––]")
     return word1 == word2
-
+    # else:
+    #     similarity = textdistance.levenshtein.normalized_similarity(word1, word2)
+    #     return similarity >= 0.625
 
 def process_karaoke(input_karaoke: ass.Document, input_lyrics, input_song_analysis):
-    output_karaoke = copy.deepcopy(input_karaoke)
-    del output_karaoke.events[-1]
-    word_timings = []
-
+    ai_word_timings = []
+    ai_word_timings_undo_stack = []
+    ai_word_timings_redo_stack = []
     for segment in input_song_analysis["segments"]:
         for word in segment["words"]:
             # convert seconds to centiseconds
             temp_word = copy.copy(word)
             temp_word["start"] = temp_word["start"] * 100
             temp_word["end"] = temp_word["end"] * 100
-            word_timings.append(temp_word)
+            ai_word_timings.append(temp_word)
+    ai_word_timings = ai_word_timings[:-3]  # remove "Thanks for watching"
 
-    word_timing_index = 0
-    current_timing_group = []
-    invalid_word_timings = []
-    word_timing_text = None
-    for lyric_line_index, lyric_line in enumerate(input_lyrics):
+    window = tk.Tk()
+    window.title('Karaoke Correction')
+    window.geometry("1200x800")
+
+    longest_line_word_count = 0
+    lyric_lines_by_words = []
+    dynamic_ai_word_texts = []
+    temp_ai_word_timings_index = 0
+    for lyric_line in input_lyrics:
         lyric_line_words = lyric_line.split(" ")
-        # .ass /k centiseconds (100 centiseconds = 1 second) and is duration based
-        # whisper-timestamped is in seconds and is absolute based
-        line_found = False
-        for line_word_index, line_word in enumerate(lyric_line_words):
-            # if word_timing_index >= len(word_timings):
-            #     break
-            match_found = False
-            # TODO: change static range to dynamic using length of this line and next line
-            # retry_range = len(lyric_line_words) - line_word_index
-            # if lyric_line_index < len(input_lyrics):
-            #     retry_range += len(input_lyrics[lyric_line_index+1].split(" "))
-            for retry_number in range(4):
-                if word_timing_index + retry_number >= len(word_timings):
-                    break
-                word_timing = word_timings[word_timing_index + retry_number]
-                word_timing_text = word_timing["text"]
-                if is_same_word(line_word, word_timing_text):
-                    match_found = True
-                    # If match found, insert invalid words timings that preceded it
-                    if len(invalid_word_timings) > 0:
-                        invalid_timing_start = invalid_word_timings[0]["start"]
-                        invalid_timing_end = invalid_word_timings[-1]["end"]
-                        full_text = ""
-                        for invalid_timing in invalid_word_timings:
-                            full_text += invalid_timing["text"] + " "
-                        current_timing_group.append({
-                            "text": full_text.strip(),
-                            "start": invalid_timing_start,
-                            "end": invalid_timing_end,
-                        })
-                        # word_timing_index += len(invalid_word_timings)
-                        invalid_word_timings = []
+        lyric_lines_by_words.append(lyric_line_words)
+        lyric_line_length = len(lyric_line_words)
+        if lyric_line_length > longest_line_word_count:
+            longest_line_word_count = lyric_line_length
+        for lyric_line_word in lyric_line_words:
+            # dynamic_ai_word_texts.append(tk.StringVar(window, ai_word_timings[temp_ai_word_timings_index]["text"]))
+            dynamic_ai_word_texts.append(tk.StringVar())
+            temp_ai_word_timings_index += 1
+    lyric_word_count = 0
+    for lyric_line in lyric_lines_by_words:
+        for lyric_word in lyric_line:
+            lyric_word_count += 1
 
-                    current_timing_group.append({
-                        "text": line_word,
-                        "start": word_timing["start"],
-                        "end": word_timing["end"],
-                        # "duration": word_timing["end"] - word_timing["start"]
-                    })
-                    word_timing_index += 1 + retry_number
-                    break
+    # Create A Main frame
+    main_frame = tk.Frame(window)
+    main_frame.pack(fill=tk.BOTH, expand=1)
 
-            # no match in upcoming 4 words
-            if match_found is False:
-                invalid_word = {
-                    "text": line_word,
-                    "start": word_timings[word_timing_index]["start"],
-                    "end": word_timings[word_timing_index]["end"],
-                    "aitext": word_timings[word_timing_index]["text"],
-                }
-                invalid_word_timings.append(invalid_word)
-                # word_timing_index += 1
-                # If that last word in line is not found, then insert invalid timings
-                if line_word_index == len(lyric_line_words) - 1:
-                    # TODO: refactor to function
-                    invalid_timing_start = invalid_word_timings[0]["start"]
-                    invalid_timing_end = invalid_word_timings[-1]["end"]
-                    full_text = ""
-                    for invalid_timing in invalid_word_timings:
-                        full_text += invalid_timing["text"] + " "
-                    current_timing_group.append({
-                        "text": full_text.strip(),
-                        "start": invalid_timing_start,
-                        "end": invalid_timing_end,
-                    })
-                    # word_timing_index += len(invalid_word_timings)
-                    invalid_word_timings = []
-                # If AI word is not in rest of current lyric line or the next lyric line, increment index to next AI
-                # word TODO: cleanup this nightmare
-                if word_timing_index < len(word_timings) - 1:
-                    temp_lyric_words = []
-                    line_words_index_start = line_word_index + 1 if line_word_index < len(lyric_line_words) - 1 else len(lyric_line_words) - 1
-                    line_words_index_stop = len(lyric_line_words)
-                    for temp_line_word_index in range(line_words_index_start, line_words_index_stop):
-                        temp_lyric_words.append(lyric_line_words[temp_line_word_index])
-                    if lyric_line_index < len(input_lyrics) - 1:
-                        temp_lyric_line = input_lyrics[lyric_line_index+1]
-                        temp_lyric_line_words = temp_lyric_line.split(" ")
-                        for temp_lyric_line_word in temp_lyric_line_words:
-                            temp_lyric_words.append(temp_lyric_line_word)
-                    found_future_lyric_match = False
-                    for temp_lyric_word in temp_lyric_words:
-                        if is_same_word(temp_lyric_word, word_timing_text):
-                            found_future_lyric_match = True
-                            break
-                    if not found_future_lyric_match:
-                        word_timing_index += 1
+    # Create Frame for X Scrollbar
+    sec = tk.Frame(main_frame)
+    sec.pack(fill=tk.X, side=tk.BOTTOM)
 
-        subtitle_text = ""
-        for current_timing_word in current_timing_group:
-            word_duration = int(round(current_timing_word['end'] - current_timing_word['start']))
-            subtitle_text += f"{{\\k{word_duration}}}{current_timing_word['text']} "
-        subtitle_text = subtitle_text.strip()
-        subtitle_style = "Sample KM [Up]"
-        subtitle_start = datetime.timedelta(seconds=current_timing_group[0]["start"] / 100)
-        subtitle_end = datetime.timedelta(seconds=current_timing_group[-1]["end"] / 100)
-        dialogue_event = ass.Dialogue(layer=0, start=subtitle_start, end=subtitle_end, style=subtitle_style, name='', margin_l=0, margin_r=0, margin_v=0, effect='', text=subtitle_text)
-        output_karaoke.events.append(dialogue_event)
-        current_timing_group = []
+    # Create A Canvas
+    my_canvas = tk.Canvas(main_frame)
+    my_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
 
-    return output_karaoke
+    # Add A Scrollbars to Canvas
+    x_scrollbar = ttk.Scrollbar(sec, orient=tk.HORIZONTAL, command=my_canvas.xview)
+    x_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+    y_scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=my_canvas.yview)
+    y_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    # Configure the canvas
+    my_canvas.configure(xscrollcommand=x_scrollbar.set)
+    my_canvas.configure(yscrollcommand=y_scrollbar.set)
+    my_canvas.bind("<Configure>", lambda e: my_canvas.config(scrollregion=my_canvas.bbox(tk.ALL)))
+
+    # Create Another Frame INSIDE the Canvas
+    second_frame = tk.Frame(my_canvas)
+
+    # Add that New Frame a Window In The Canvas
+    my_canvas.create_window((0, 0), window=second_frame, anchor="nw")
+
+    # edit_label = tk.Label(master=second_frame, text="Enter edited value here:")
+    # edit_label.grid(row=0, column=longest_line_word_count + 1)
+    # edit_entry = tk.Entry(master=second_frame)
+    # edit_entry.grid(row=1, column=longest_line_word_count + 1)
+
+    def finalize_karaoke():
+        if len(ai_word_timings) != lyric_word_count:
+            return False
+
+        output_karaoke = copy.deepcopy(input_karaoke)
+        del output_karaoke.events[-1]
+
+        temp_ai_word_index = 0
+        # previous_end_timing = ai_word_timings[0]['start']
+        for temp_lyric_line in lyric_lines_by_words:
+            subtitle_text = ""
+            subtitle_start_timing = None
+            subtitle_end_timing = None
+            for lyric_word_index, temp_lyric_word in enumerate(temp_lyric_line):
+                ai_word = ai_word_timings[temp_ai_word_index]
+                word_duration = int(round(ai_word['end'] - ai_word['start']))
+                # if previous_end_timing < ai_word['start']:
+                #     word_duration += int(round(ai_word['start'] - previous_end_timing))
+                subtitle_text += f"{{\\k{word_duration}}}{temp_lyric_word} "
+                previous_end_timing = ai_word['end']
+                if lyric_word_index == 0:
+                    subtitle_start_timing = ai_word['start']
+                if lyric_word_index == len(temp_lyric_line) - 1:
+                    subtitle_end_timing = ai_word['end']
+                temp_ai_word_index += 1
+            subtitle_text = subtitle_text.strip()
+            subtitle_style = "Sample KM [Up]"
+            # .ass /k centiseconds (100 centiseconds = 1 second) and is duration based
+            # whisper-timestamped is in seconds and is absolute based
+            subtitle_start = datetime.timedelta(seconds=subtitle_start_timing / 100)
+            subtitle_end = datetime.timedelta(seconds=subtitle_end_timing / 100)
+            dialogue_event = ass.Dialogue(layer=0, start=subtitle_start, end=subtitle_end, style=subtitle_style,
+                                          name='',
+                                          margin_l=0, margin_r=0, margin_v=0, effect='', text=subtitle_text)
+            output_karaoke.events.append(dialogue_event)
+        with open(args.song_path + ".ass", "w", encoding="utf_8_sig") as file:
+            output_karaoke.dump_file(file)
+        return True
+
+    def update_dynamic_texts():
+        for dynamic_ai_word_index, dynamic_ai_word in enumerate(dynamic_ai_word_texts):
+            if dynamic_ai_word_index < len(ai_word_timings):
+                dynamic_ai_word.set(ai_word_timings[dynamic_ai_word_index]["text"])
+            else:
+                dynamic_ai_word.set("")
+        ai_counter = 0
+        for lyric_line_by_word in lyric_lines_by_words:
+            for temp_lyric_word in lyric_line_by_word:
+                if is_same_word(temp_lyric_word, dynamic_ai_word_texts[ai_counter].get()):
+                    word_frames[ai_counter].configure(bg="green")
+                else:
+                    word_frames[ai_counter].configure(bg="red")
+                ai_counter += 1
+
+    def save(event=None):
+        filepath = asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON Files", "*.json")]
+        )
+        if not filepath:
+            return
+        with open(filepath, mode="w", encoding="utf-8") as output_file:
+            json_str = json.dumps(ai_word_timings, indent=4)
+            output_file.write(json_str)
+
+    def load(event=None):
+        filepath = askopenfilename(filetypes=[("JSON Files", "*.json")])
+        if not filepath:
+            return
+        with open(filepath, mode="r", encoding="utf-8") as input_file:
+            nonlocal ai_word_timings
+            ai_word_timings_json = json.load(input_file)
+            ai_word_timings = ai_word_timings_json.copy()
+            update_dynamic_texts()
+
+    save_button = tk.Button(
+        master=second_frame,
+        text="Save",
+        command=partial(save)
+    )
+    save_button.grid(row=0, column=longest_line_word_count + 1)
+    load_button = tk.Button(
+        master=second_frame,
+        text="Load",
+        command=partial(load)
+    )
+    load_button.grid(row=1, column=longest_line_word_count + 1)
+    finalize_button = tk.Button(
+        master=second_frame,
+        text="Output subtitle file (only when all cells are green)",
+        command=finalize_karaoke
+    )
+    finalize_button.grid(row=2, column=longest_line_word_count + 1)
+
+
+    # render words
+    ai_word_index = 0
+    word_frames = []
+
+    def add_to_changelog():
+        ai_word_timings_redo_stack.clear()
+        ai_word_timings_undo_stack.append(ai_word_timings.copy())
+
+    def undo(event=None):
+        nonlocal ai_word_timings
+        if len(ai_word_timings_undo_stack) > 0:
+            ai_word_timings_redo_stack.append(ai_word_timings.copy())
+            ai_word_timings = ai_word_timings_undo_stack.pop()
+            update_dynamic_texts()
+
+    def redo(event=None):
+        nonlocal ai_word_timings
+        if len(ai_word_timings_redo_stack) > 0:
+            ai_word_timings_undo_stack.append(ai_word_timings.copy())
+            ai_word_timings = ai_word_timings_redo_stack.pop()
+            update_dynamic_texts()
+
+    window.bind('<Control-z>', undo)
+    window.bind('<Control-y>', redo)
+    window.bind('<Control-s>', save)
+    window.bind('<Control-o>', load)
+
+    for row_index in range(len(input_lyrics)):
+        for col_index in range(longest_line_word_count):
+            frame = tk.Frame(
+                master=second_frame,
+                relief=tk.RAISED,
+                borderwidth=1
+            )
+            frame.grid(row=row_index, column=col_index, sticky="nsew")
+            if col_index < len(lyric_lines_by_words[row_index]):
+                lyric_word_text = lyric_lines_by_words[row_index][col_index]
+                lyric_word_label = tk.Label(
+                    master=frame,
+                    text=lyric_word_text
+                )
+                # ai_word_text = ai_word_timings[ai_word_index]["text"]
+                ai_word_text = dynamic_ai_word_texts[ai_word_index]
+                ai_word_label = tk.Label(
+                    master=frame
+                )
+                ai_word_text.set(ai_word_timings[ai_word_index]["text"])
+                ai_word_label["textvariable"] = ai_word_text
+                if is_same_word(lyric_word_text, ai_word_text.get()):
+                    frame.configure(bg="green")
+                else:
+                    frame.configure(bg="red")
+                word_frames.append(frame)
+
+                def add_ai_word(index):
+                    add_to_changelog()
+                    # edit_entry_text = edit_entry.get()
+                    # 'text': edit_entry_text if len(edit_entry_text) > 0 else "",
+                    blank_ai_word = {
+                        'text': "",
+                        'start': ai_word_timings[index - 1]["end"] if index > 0 else 0.0,
+                        'end': ai_word_timings[index]["start"]
+                    }
+                    ai_word_timings.insert(index, blank_ai_word)
+                    update_dynamic_texts()
+
+                def match_lyric_word(index, lyric):
+                    add_to_changelog()
+                    ai_word_timings[index]["text"] = lyric
+                    update_dynamic_texts()
+
+                # def edit_ai_word(index):
+                #     add_to_changelog()
+                #     ai_word_timings[index]["text"] = edit_entry.get()
+                #     update_dynamic_texts()
+
+                def delete_ai_word(index):
+                    add_to_changelog()
+                    del ai_word_timings[index]
+                    update_dynamic_texts()
+
+                def merge_ai_word_with_right(index):
+                    add_to_changelog()
+                    if index >= len(ai_word_timings) - 1:
+                        print("merge_ai_word_with_right(): can't merge last word")
+                    merged_word = {
+                        'text': ai_word_timings[index]['text'] + ai_word_timings[index+1]['text'],
+                        'start': ai_word_timings[index]['start'],
+                        'end': ai_word_timings[index+1]['end']
+                    }
+                    ai_word_timings[index] = merged_word
+                    del ai_word_timings[index+1]
+                    update_dynamic_texts()
+
+                def split_ai_word(index):
+                    add_to_changelog()
+                    whole_word = ai_word_timings[index]['text']
+                    halfway_index = int(len(whole_word) / 2)
+                    split_word1 = whole_word[:halfway_index]
+                    split_word2 = whole_word[halfway_index:]
+                    start = ai_word_timings[index]['start']
+                    end = ai_word_timings[index]['end']
+                    halfway_time = start + ((end - start) / 2)
+
+                    new_word1 = {
+                        'text': split_word1,
+                        'start': start,
+                        'end': halfway_time
+                    }
+                    new_word2 = {
+                        'text': split_word2,
+                        'start': halfway_time,
+                        'end': end
+                    }
+                    ai_word_timings[index] = new_word1
+                    ai_word_timings.insert(index+1, new_word2)
+                    update_dynamic_texts()
+
+                popup_menu = tk.Menu(frame, tearoff=0)
+                popup_menu.add_command(
+                    label="Add word",
+                    command=partial(add_ai_word, ai_word_index)
+                )
+                popup_menu.add_command(
+                    label="Match word with lyric",
+                    command=partial(match_lyric_word, ai_word_index, lyric_word_text)
+                )
+                # popup_menu.add_command(
+                #     label="Edit word",
+                #     command=partial(edit_ai_word, ai_word_index)
+                # )
+                popup_menu.add_command(
+                    label="Delete word",
+                    command=partial(delete_ai_word, ai_word_index)
+                )
+                popup_menu.add_command(
+                    label="Merge word with right",
+                    command=partial(merge_ai_word_with_right, ai_word_index)
+                )
+                popup_menu.add_command(
+                    label="Split word",
+                    command=partial(split_ai_word, ai_word_index)
+                )
+                popup_menu.add_separator()
+                popup_menu.add_command(
+                    label="Undo",
+                    command=undo
+                )
+                popup_menu.add_command(
+                    label="Redo",
+                    command=redo
+                )
+
+                def do_popup(event=None, temp_popup_menu=None):
+                    try:
+                        temp_popup_menu.tk_popup(event.x_root, event.y_root)
+                    finally:
+                        temp_popup_menu.grab_release()
+
+                def make_lambda(pop):
+                    return lambda ev: do_popup(ev, pop)
+                ai_word_label.bind("<Button-3>", make_lambda(popup_menu))
+
+                lyric_word_label.pack()
+                ai_word_label.pack()
+                ai_word_index += 1
+    # TODO: add ai word overflow line
+    overflow_ai_words = ai_word_timings[ai_word_index:]
+    overflow_label_text = "OVERFLOW: "
+    for overflow_index in range(len(overflow_ai_words)):
+        overflow_label_text += overflow_ai_words[overflow_index]["text"] + " "
+    overflow_label = tk.Label(master=window, text=overflow_label_text)
+    overflow_label.pack()
+
+    window.mainloop()
 
 
 if __name__ == "__main__":
@@ -241,9 +468,7 @@ if __name__ == "__main__":
         with open("sampleKaraokeMugen.ass", encoding="utf_8_sig") as f:
             base_karaoke = ass.parse(f)
 
-        karaoke = process_karaoke(base_karaoke, lyrics, song_analysis)
-        with open(args.song_path + ".ass", "w", encoding="utf_8_sig") as f:
-            karaoke.dump_file(f)
+        process_karaoke(base_karaoke, lyrics, song_analysis)
 
     except Exception as e:
         print(str(e))
