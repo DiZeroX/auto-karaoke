@@ -14,6 +14,7 @@ from tkinter.filedialog import askopenfilename, asksaveasfilename
 from functools import partial
 import importlib.resources
 import os
+import cutlet
 # import stable_whisper
 # import textdistance
 
@@ -28,6 +29,7 @@ def wrapper():
     # parser.add_argument("output_path", help="")
     parser.add_argument("--encoding", help="text encoding of lyric text file", choices=["utf-8", "windows-1252"],
                         default="utf-8")
+    parser.add_argument("--romaji", action="store_true", help="flag for lyric file being romaji")
     parser.add_argument("--language", help=f"language spoken in the audio, specify None to perform language detection",
                         choices=sorted(whisper.tokenizer.LANGUAGES.keys()) + sorted(
                             [k.title() for k in whisper.tokenizer.TO_LANGUAGE_CODE.keys()]), default=None)
@@ -99,6 +101,18 @@ def wrapper():
         # else:
         #     similarity = textdistance.levenshtein.normalized_similarity(word1, word2)
         #     return similarity >= 0.625
+
+    def convert_transcription_to_romaji(transcription):
+        converted_transcription = copy.copy(transcription)
+        katsu = cutlet.Cutlet()
+        katsu.use_foreign_spelling = False
+
+        for segment_index, segment in enumerate(transcription["segments"]):
+            for word_index, word in enumerate(segment["words"]):
+                converted_word = katsu.romaji(word["text"])
+                converted_transcription["segments"][segment_index]["words"][word_index]["text"] = converted_word
+
+        return converted_transcription
 
     def process_karaoke(input_karaoke: ass.Document, input_lyrics, input_song_analysis):
         ai_word_timings = []
@@ -449,6 +463,8 @@ def wrapper():
             print("AI analysis already done")
             with open(result_json_path, "r") as infile:
                 song_analysis = json.load(infile)
+                if args.romaji:
+                    song_analysis = convert_transcription_to_romaji(song_analysis)
         else:
             print("Using CUDA: " + str(torch.cuda.is_available()))
             devices = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -459,11 +475,12 @@ def wrapper():
             with open(result_json_path, "w") as outfile:
                 outfile.write(json.dumps(song_analysis, indent=2, ensure_ascii=True))
 
+
         # Process lyrics text file
         with open(args.lyrics_path, "r", encoding=args.encoding) as infile:
             og_lyrics = infile.read().splitlines()
         lyrics = preprocess_lyrics(og_lyrics)
-        with open(lyric_processed_path, "w") as outfile:
+        with open(lyric_processed_path, "w", encoding=args.encoding) as outfile:
             for current_line in lyrics:
                 outfile.write(("%s\n" % current_line))
 
@@ -472,7 +489,6 @@ def wrapper():
         with importlib.resources.path("auto_karaoke", "sampleKaraokeMugen.ass") as sample_karaoke_path:
             with open(sample_karaoke_path, encoding="utf_8_sig") as f:
                 base_karaoke = ass.parse(f)
-
         process_karaoke(base_karaoke, lyrics, song_analysis)
 
     except Exception as e:
