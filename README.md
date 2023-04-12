@@ -3,7 +3,7 @@ Approximate word-based subtitle timing for karaokes
 
 PyPi: https://pypi.org/project/auto-karaoke/
 
-##REQUIRED: DO FIRST
+## REQUIRED: DO FIRST
 
 Run `pip3 install git+https://github.com/linto-ai/whisper-timestamped` **BEFORE** installing `auto_karaoke`
 
@@ -16,7 +16,7 @@ Additional installation docs here: https://github.com/linto-ai/whisper-timestamp
 ## Installation
 Run `pip install auto-karaoke`
 
-###CLI
+### CLI
 ```commandline
 usage: autokaraoke [-h] [--encoding {utf-8,windows-1252}]
                    [--language {...}]
@@ -43,7 +43,7 @@ Valencian,Vietnamese,Welsh,Yiddish,Yoruba}
                         language spoken in the audio, omit to perform language detection (default: None)
 ```
 
-###CUDA
+### CUDA
 If you have CUDA-enabled hardware, you can replace the torch packages with:
 ```commandline
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 --force-reinstall
@@ -55,8 +55,7 @@ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.o
   - Solve using `pip3 install numpy==1.23.5`
 
 
-###TODO
-- Romaji support for Japanese songs
+### TODO
 - Support different karaoke styles
   - Choir
   - Down
