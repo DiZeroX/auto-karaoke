@@ -1,21 +1,29 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+build-backend = "setuptools.build_meta"
+requires = ["setuptools"]
 
 [project]
-name = "auto-karaoke"
-version = "0.0.1"
-authors = [
-  { name="DiZeroX", email="dizerox@example.com" },
-]
-description = "A small example package"
+name = "auto_karaoke"
+authors = [{name = "DiZeroX"}]
+description = "Approximate word-based subtitle timing for karaokes"
+version = "0.0.5"
+license = {text = "MIT License"}
 readme = "README.md"
-requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
 ]
+requires-python = ">=3.9"
+dependencies = [
+    "ass == 0.5.2",
+    "ffmpeg-python == 0.2.0",
+    "whisper_timestamped @ git+https://github.com/linto-ai/whisper-timestamped",
+    "torch",
+    "torchaudio",
+    "torchvision",
+]
+
+[project.scripts]
+autokaraoke = "auto_karaoke.main:wrapper"
 
 [project.urls]
 "Homepage" = "https://github.com/DiZeroX/auto-karaoke"
