@@ -1,6 +1,10 @@
 # Auto Karaoke
+Approximate word-based subtitle timing for karaokes
+
+PyPi: https://pypi.org/project/auto-karaoke/
 
 ##REQUIRED: DO FIRST
+
 Run `pip3 install git+https://github.com/linto-ai/whisper-timestamped` **BEFORE** installing `auto_karaoke`
 
 `whisper-timestamped` does not have a PiPy package, so it is unable to be referenced it in `pyproject.toml`.
@@ -8,6 +12,9 @@ Run `pip3 install git+https://github.com/linto-ai/whisper-timestamped` **BEFORE*
 Installing `whisper-timestamped` after `auto_karaoke` may cause permission issues with your venv.
 
 Additional installation docs here: https://github.com/linto-ai/whisper-timestamped#installation
+
+## Installation
+Run `pip install auto-karaoke`
 
 ###CLI
 ```commandline
