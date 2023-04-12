@@ -16,7 +16,6 @@ requires-python = ">=3.9"
 dependencies = [
     "ass == 0.5.2",
     "ffmpeg-python == 0.2.0",
-    "whisper_timestamped @ git+https://github.com/linto-ai/whisper-timestamped",
     "torch",
     "torchaudio",
     "torchvision",

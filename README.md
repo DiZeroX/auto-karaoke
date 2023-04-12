@@ -1,5 +1,14 @@
 # Auto Karaoke
 
+##REQUIRED: DO FIRST
+Run `pip3 install git+https://github.com/linto-ai/whisper-timestamped` **BEFORE** installing `auto_karaoke`
+
+`whisper-timestamped` does not have a PiPy package, so it is unable to be referenced it in `pyproject.toml`.
+
+Installing `whisper-timestamped` after `auto_karaoke` may cause permission issues with your venv.
+
+Additional installation docs here: https://github.com/linto-ai/whisper-timestamped#installation
+
 ###CLI
 ```commandline
 usage: autokaraoke [-h] [--encoding {utf-8,windows-1252}]
@@ -30,13 +39,13 @@ Valencian,Vietnamese,Welsh,Yiddish,Yoruba}
 ###CUDA
 If you have CUDA-enabled hardware, you can replace the torch packages with:
 ```commandline
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 --force-reinstall
 ```
-- Currently there is a `numpy` version conflict
+- Currently there is a `numpy` version conflict with `numba`
   - Have to wait for following code changes in new release:
     - https://github.com/numba/numba/pull/8837
     - https://github.com/numba/numba/pull/8691
-- Solve using `pip3 install numpy==1.23.5`
+  - Solve using `pip3 install numpy==1.23.5`
 
 
 ###TODO
