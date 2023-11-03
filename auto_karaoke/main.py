@@ -17,6 +17,7 @@ import os
 # import stable_whisper
 # import textdistance
 
+OVERFLOW_BUFFER = 50
 
 def wrapper():
     parser = argparse.ArgumentParser(
@@ -25,6 +26,7 @@ def wrapper():
     )
     parser.add_argument("song_path", help="file path for song audio file")
     parser.add_argument("lyrics_path", help="file path for lyric text file")
+    parser.add_argument("model_size", help="model size for whisper", choices=["tiny", "small", "medium", "large", "large-v2"], default="medium")
     # parser.add_argument("output_path", help="")
     parser.add_argument("--encoding", help="text encoding of lyric text file", choices=["utf-8", "windows-1252"],
                         default="utf-8")
@@ -111,7 +113,7 @@ def wrapper():
                 temp_word["start"] = temp_word["start"] * 100
                 temp_word["end"] = temp_word["end"] * 100
                 ai_word_timings.append(temp_word)
-        ai_word_timings = ai_word_timings[:-3]  # remove "Thanks for watching"
+        # ai_word_timings = ai_word_timings[:-3]  # remove "Thanks for watching"
 
         window = tk.Tk()
         window.title('Karaoke Correction')
@@ -120,6 +122,8 @@ def wrapper():
         longest_line_word_count = 0
         lyric_lines_by_words = []
         dynamic_ai_word_texts = []
+        dynamic_overflow_ai_word_texts = []
+        overflow_word_frames = []
         temp_ai_word_timings_index = 0
         for lyric_line in input_lyrics:
             lyric_line_words = lyric_line.split(" ")
@@ -127,10 +131,12 @@ def wrapper():
             lyric_line_length = len(lyric_line_words)
             if lyric_line_length > longest_line_word_count:
                 longest_line_word_count = lyric_line_length
-            for lyric_line_word in lyric_line_words:
+            for _lyric_line_word in lyric_line_words:
                 # dynamic_ai_word_texts.append(tk.StringVar(window, ai_word_timings[temp_ai_word_timings_index]["text"]))
                 dynamic_ai_word_texts.append(tk.StringVar())
                 temp_ai_word_timings_index += 1
+        for overflow_buffer_index in range(OVERFLOW_BUFFER):
+            dynamic_overflow_ai_word_texts.append(tk.StringVar())
         lyric_word_count = 0
         for lyric_line in lyric_lines_by_words:
             for lyric_word in lyric_line:
@@ -209,6 +215,10 @@ def wrapper():
                 output_karaoke.dump_file(file)
             return True
 
+        def add_to_changelog():
+            ai_word_timings_redo_stack.clear()
+            ai_word_timings_undo_stack.append(ai_word_timings.copy())
+
         def update_dynamic_texts():
             for dynamic_ai_word_index, dynamic_ai_word in enumerate(dynamic_ai_word_texts):
                 if dynamic_ai_word_index < len(ai_word_timings):
@@ -223,6 +233,18 @@ def wrapper():
                     else:
                         word_frames[ai_counter].configure(bg="red")
                     ai_counter += 1
+            overflow_words = ai_word_timings[lyric_word_count:]
+            for dynamic_overflow_ai_word_index, dynamic_overflow_ai_word in enumerate(dynamic_overflow_ai_word_texts):
+                if dynamic_overflow_ai_word_index < (len(ai_word_timings) - lyric_word_count):
+                    dynamic_overflow_ai_word_texts[dynamic_overflow_ai_word_index].set(overflow_words[dynamic_overflow_ai_word_index]["text"])
+                else:
+                    dynamic_overflow_ai_word_texts[dynamic_overflow_ai_word_index].set("")
+
+        def clear_overflow(event=None):
+            add_to_changelog()
+            for overflow_index in range(len(ai_word_timings) - lyric_word_count):
+                del ai_word_timings[lyric_word_count]
+            update_dynamic_texts()
 
         def save(event=None):
             filepath = asksaveasfilename(
@@ -245,33 +267,6 @@ def wrapper():
                 ai_word_timings = ai_word_timings_json.copy()
                 update_dynamic_texts()
 
-        save_button = tk.Button(
-            master=second_frame,
-            text="Save",
-            command=partial(save)
-        )
-        save_button.grid(row=0, column=longest_line_word_count + 1)
-        load_button = tk.Button(
-            master=second_frame,
-            text="Load",
-            command=partial(load)
-        )
-        load_button.grid(row=1, column=longest_line_word_count + 1)
-        finalize_button = tk.Button(
-            master=second_frame,
-            text="Output subtitle file (only when all cells are green)",
-            command=finalize_karaoke
-        )
-        finalize_button.grid(row=2, column=longest_line_word_count + 1)
-
-        # render words
-        ai_word_index = 0
-        word_frames = []
-
-        def add_to_changelog():
-            ai_word_timings_redo_stack.clear()
-            ai_word_timings_undo_stack.append(ai_word_timings.copy())
-
         def undo(event=None):
             nonlocal ai_word_timings
             if len(ai_word_timings_undo_stack) > 0:
@@ -290,6 +285,58 @@ def wrapper():
         window.bind('<Control-y>', redo)
         window.bind('<Control-s>', save)
         window.bind('<Control-o>', load)
+
+        sidebar_column_position = longest_line_word_count + 1
+        save_button = tk.Button(
+            master=second_frame,
+            text="Save",
+            command=partial(save)
+        )
+        save_button.grid(row=0, column=sidebar_column_position)
+        load_button = tk.Button(
+            master=second_frame,
+            text="Load",
+            command=partial(load)
+        )
+        load_button.grid(row=1, column=sidebar_column_position)
+        finalize_button = tk.Button(
+            master=second_frame,
+            text="Output subtitle file (only when all cells are green)",
+            command=finalize_karaoke
+        )
+        finalize_button.grid(row=2, column=sidebar_column_position)
+        help_text = tk.Label(master=second_frame, text="Top word is actual lyric, bottom word is AI transcription")
+        help_text.grid(row=3, column=sidebar_column_position)
+        help2_text = tk.Label(master=second_frame, text="Right-click on word pairing to edit")
+        help2_text.grid(row=4, column=sidebar_column_position)
+        clear_overflow_button = tk.Button(
+            master=second_frame,
+            text="Clear Overflow",
+            command=partial(clear_overflow)
+        )
+        clear_overflow_button.grid(row=5, column=sidebar_column_position)
+
+        # render words
+        ai_word_index = 0
+        word_frames = []
+
+        # Show overflow of words from transcription
+        # overflow_frame = tk.Frame(master=window)
+        # overflow_frame.pack(fill=tk.BOTH, expand=1)
+        # for overflow_buffer_index in range(OVERFLOW_BUFFER):
+        #     overflow_word_frame = tk.Frame(
+        #         master=overflow_frame,
+        #         relief=tk.RAISED,
+        #         borderwidth=1
+        #     )
+        #     overflow_word_frame.grid(row=0, column=overflow_buffer_index, sticky="nsew")
+        #     overflow_word_label = tk.Label(master=overflow_word_frame)
+        #     overflow_word_label["textvariable"] = dynamic_overflow_ai_word_texts[overflow_buffer_index]
+        #     overflow_word_frames.append(overflow_word_frame)
+        #     def delete_overflow_word(index):
+        #         add_to_changelog()
+        #         del ai_word_timings[index]
+        #         update_dynamic_texts()
 
         for row_index in range(len(input_lyrics)):
             for col_index in range(longest_line_word_count):
@@ -310,7 +357,10 @@ def wrapper():
                     ai_word_label = tk.Label(
                         master=frame
                     )
-                    ai_word_text.set(ai_word_timings[ai_word_index]["text"])
+                    if ai_word_index < len(ai_word_timings):
+                        ai_word_text.set(ai_word_timings[ai_word_index]["text"])
+                    else:
+                        ai_word_text.set("")
                     ai_word_label["textvariable"] = ai_word_text
                     if is_same_word(lyric_word_text, ai_word_text.get()):
                         frame.configure(bg="green")
@@ -428,16 +478,37 @@ def wrapper():
 
                     ai_word_label.bind("<Button-3>", make_lambda(popup_menu))
 
-                    lyric_word_label.pack()
-                    ai_word_label.pack()
+                    lyric_word_label.pack(pady=(5,0))
+                    ai_word_label.pack(pady=(0,5))
                     ai_word_index += 1
         # TODO: add ai word overflow line
-        overflow_ai_words = ai_word_timings[ai_word_index:]
-        overflow_label_text = "OVERFLOW: "
+        if ai_word_index is not lyric_word_count:
+            print("Mismatch overflow")
+        overflow_ai_words = ai_word_timings[lyric_word_count:]
+
+        # Create Another Frame INSIDE the Canvas
+        third_frame = tk.Frame(my_canvas)
+
+        # Add that New Frame a Window In The Canvas
+        my_canvas.create_window((1150, 1100), window=third_frame, anchor="se")
+        tk.Label(master=third_frame, text="OVERFLOW: ").pack()
         for overflow_index in range(len(overflow_ai_words)):
-            overflow_label_text += overflow_ai_words[overflow_index]["text"] + " "
-        overflow_label = tk.Label(master=window, text=overflow_label_text)
-        overflow_label.pack()
+            overflow_label = tk.Label(master=third_frame)
+            overflow_label["textvariable"] = dynamic_overflow_ai_word_texts[overflow_index]
+            dynamic_overflow_ai_word_texts[overflow_index].set(overflow_ai_words[overflow_index]["text"])
+            overflow_label.pack()
+        for overflow_index in range(OVERFLOW_BUFFER - len(overflow_ai_words)):
+            offset_index = overflow_index + len(overflow_ai_words)
+            overflow_label = tk.Label(master=third_frame)
+            overflow_label["textvariable"] = dynamic_overflow_ai_word_texts[offset_index]
+            dynamic_overflow_ai_word_texts[offset_index].set("")
+            overflow_label.pack()
+
+        # overflow_label_text = "OVERFLOW: "
+        # for overflow_index in range(len(overflow_ai_words)):
+        #     overflow_label_text += overflow_ai_words[overflow_index]["text"] + " "
+        # overflow_label = tk.Label(master=window, text=overflow_label_text)
+        # overflow_label.pack()
 
         window.mainloop()
 
@@ -453,7 +524,7 @@ def wrapper():
             print("Using CUDA: " + str(torch.cuda.is_available()))
             devices = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             audio = whisper.load_audio(args.song_path)
-            model = whisper.load_model("large-v2", device=devices)
+            model = whisper.load_model(args.model_size, device=devices)
             song_analysis = whisper.transcribe(model, audio, language=args.language)
 
             with open(result_json_path, "w") as outfile:

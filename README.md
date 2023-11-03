@@ -20,13 +20,15 @@ Run `pip install auto-karaoke`
 ```commandline
 usage: autokaraoke [-h] [--encoding {utf-8,windows-1252}]
                    [--language {...}]
-                   song_path lyrics_path
+                   song_path lyrics_path model_size
 
 Create karaoke .ass file from song audio and lyric text
 
 positional arguments:
   song_path             file path for song audio file
   lyrics_path           file path for lyric text file
+  model_size {tiny,small,medium,large,large-v2}
+                        model size for whisper (default: medium)
 
 optional arguments:
   -h, --help            show this help message and exit
